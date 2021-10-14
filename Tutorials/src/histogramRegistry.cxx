@@ -90,6 +90,8 @@ struct DimensionTest {
 
     registry.add("4d-weight", "test 4d weight", {HistType::kTHnC, {{2, -10.0f, 10.01f}, {2, -10.0f, 10.01f}, {2, -10.0f, 10.01f}, {100, -10.0f, 10.01f}}}, true);
 
+    registry.add("4d-thn-test", "test 4d", {HistType::kTHnC, {{2, -10.0f, 10.01f}, {2, -10.0f, 10.01f}, {2, -10.0f, 10.01f}, {100, -10.0f, 10.01f}}});
+
     registry.add("1d-profile-weight", "test 1d profile weight", {HistType::kTProfile, {{2, -10.0f, 10.01f}}}, true);
     registry.add("2d-profile-weight", "test 2d profile weight", {HistType::kTProfile2D, {{2, -10.0f, 10.01f}, {2, -10.0f, 10.01f}}}, true);
 
@@ -129,6 +131,9 @@ struct DimensionTest {
 
       registry.fill(HIST("2d-step"), 1, track.pt(), track.eta());
       registry.fill(HIST("2d-step-weight"), 2, track.pt(), track.eta(), track.phi());
+
+      registry.fill(HIST("4d-thn-test"), track.pt(), track.eta(), track.phi(), track.signed1Pt());
+
     }
   }
 };
