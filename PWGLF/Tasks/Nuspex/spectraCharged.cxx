@@ -10,7 +10,8 @@
 // or submit itself to any jurisdiction.
 
 // task for charged particle pt spectra vs multiplicity analysis with 2d unfolding for run3+
-// mimics https://github.com/alisw/AliPhysics/blob/master/PWGLF/SPECTRA/ChargedHadrons/MultDepSpec/AliMultDepSpecAnalysisTask.cxx
+// mimics Run1&2 version https://github.com/alisw/AliPhysics/blob/master/PWGLF/SPECTRA/ChargedHadrons/MultDepSpec/AliMultDepSpecAnalysisTask.cxx
+// and is compatible with postprocessing https://gitlab.cern.ch/mkruger/unfoldingframework
 
 #include "Framework/HistogramRegistry.h"
 #include "ReconstructionDataFormats/Track.h"
@@ -20,10 +21,13 @@
 #include "Common/DataModel/EventSelection.h"
 #include "Common/DataModel/Centrality.h"
 #include "Common/DataModel/TrackSelectionTables.h"
+#include "Common/Core/TrackSelection.h"
+#include "Common/Core/TrackSelectionDefaults.h"
 #include "TDatabasePDG.h"
 
 using namespace o2;
 using namespace o2::framework;
+using aod::track::TrackSelectionFlags;
 
 //--------------------------------------------------------------------------------------------------
 //--------------------------------------------------------------------------------------------------
@@ -35,15 +39,19 @@ struct chargedSpectra {
   HistogramRegistry histos;
   Service<o2::framework::O2DatabasePDG> pdg;
 
-  // task settings that can be steered via hyperloop
   Configurable<bool> isRun3{"isRun3", true, "is Run3 dataset"};
   Configurable<uint32_t> maxMultMeas{"maxMultMeas", 100, "max measured multiplicity"};
   Configurable<uint32_t> maxMultTrue{"maxMultTrue", 100, "max true multiplicity"};
   Configurable<float> etaCut{"etaCut", 0.8f, "eta cut"};
   Configurable<float> ptMinCut{"ptMinCut", 0.15f, "pt min cut"};
   Configurable<float> ptMaxCut{"ptMaxCut", 10.f, "pt max cut"};
-
   Configurable<bool> normINELGT0{"normINELGT0", false, "normalize INEL>0 according to MC"};
+
+  Configurable<uint32_t> cutMode{"cutMode", 100, "track cut variation for systematics"};
+  uint16_t trackSelMask{TrackSelectionFlags::kGlobalTrackWoPtEta}; // track selection bitmask (without cut that is being varied)
+  uint16_t cutVarFlag{0};
+  TrackSelection trackSel;
+  TrackSelection::TrackCuts trackSelFlag;
 
   // helper struct to store transient properties
   struct varContainer {
@@ -77,31 +85,17 @@ struct chargedSpectra {
   void processTrue(const C& collision, const P& particles);
 
   using CollisionTableData = soa::Join<aod::Collisions, aod::EvSels>;
-  using TrackTableData = soa::Join<aod::Tracks, aod::TrackSelection>;
+  using TrackTableData = soa::Join<aod::FullTracks, aod::TracksDCA, aod::TrackSelection>;
   void processData(CollisionTableData::iterator const& collision, TrackTableData const& tracks);
   PROCESS_SWITCH(chargedSpectra, processData, "process data", false);
 
   using CollisionTableMCTrue = aod::McCollisions;
   using CollisionTableMC = soa::SmallGroups<soa::Join<aod::McCollisionLabels, aod::Collisions, aod::EvSels>>;
-  using TrackTableMC = soa::Join<aod::Tracks, aod::McTrackLabels, aod::TrackSelection>;
+  using TrackTableMC = soa::Join<aod::FullTracks, aod::TracksDCA, aod::TrackSelection, aod::McTrackLabels>;
   using ParticleTableMC = aod::McParticles;
   Preslice<TrackTableMC> perCollision = aod::track::collisionId;
   void processMC(CollisionTableMCTrue::iterator const& mcCollision, CollisionTableMC const& collisions, TrackTableMC const& tracks, ParticleTableMC const& particles);
   PROCESS_SWITCH(chargedSpectra, processMC, "process mc", true);
-
-  // TODO: - Milestone -  express most of the selections on events and tracks in a declarative way to improve performance
-  /*
-   add
-    Filter xy;
-    soa::Filtered<Table>
-
-   For the collision and track tables (data and MC):
-    - collision z pos < 10cm
-    - trigger condition + event selection
-    - track selection + is in kine range
-
-   For the MC tables we need to keep everything that EITHER fulfils the conditions in data OR in MC to get correct efficiencies and contamination!
-  */
 };
 
 WorkflowSpec defineDataProcessing(ConfigContext const& cfgc)
@@ -162,6 +156,62 @@ void chargedSpectra::init(InitContext const&)
     histos.add("multPtSpec_trk_meas_evtcont", "", kTH2D, {multMeasAxis, ptMeasAxis}); // tracks from events that are measured, but do not belong to the desired class of events
     histos.add("multPtSpec_trk_inter", "", kTH2D, {multTrueAxis, ptMeasAxis});
   }
+
+  trackSel = getGlobalTrackSelection();
+  if (cutMode == 101) {
+    trackSel.SetMaxChi2PerClusterITS(25.);
+    cutVarFlag = TrackSelectionFlags::kITSChi2NDF;
+    trackSelFlag = TrackSelection::TrackCuts::kITSChi2NDF;
+  } else if (cutMode == 102) {
+    trackSel.SetMaxChi2PerClusterITS(49.);
+    cutVarFlag = TrackSelectionFlags::kITSChi2NDF;
+    trackSelFlag = TrackSelection::TrackCuts::kITSChi2NDF;
+  } else if (cutMode == 103) {
+    trackSel.SetMaxChi2PerClusterTPC(3.0);
+    cutVarFlag = TrackSelectionFlags::kTPCChi2NDF;
+    trackSelFlag = TrackSelection::TrackCuts::kTPCChi2NDF;
+  } else if (cutMode == 104) {
+    trackSel.SetMaxChi2PerClusterTPC(5.0);
+    cutVarFlag = TrackSelectionFlags::kTPCChi2NDF;
+    trackSelFlag = TrackSelection::TrackCuts::kTPCChi2NDF;
+  } else if (cutMode == 105) {
+    trackSel.SetMinNCrossedRowsOverFindableClustersTPC(0.7);
+    cutVarFlag = TrackSelectionFlags::kTPCCrossedRowsOverNCls;
+    trackSelFlag = TrackSelection::TrackCuts::kTPCCrossedRowsOverNCls;
+  } else if (cutMode == 106) {
+    trackSel.SetMinNCrossedRowsOverFindableClustersTPC(0.9);
+    cutVarFlag = TrackSelectionFlags::kTPCCrossedRowsOverNCls;
+    trackSelFlag = TrackSelection::TrackCuts::kTPCCrossedRowsOverNCls;
+  } else if (cutMode == 111) {
+    trackSel.SetMaxDcaXYPtDep([](float pt) { return 4. / 7. * (0.0105f + 0.0350f / pow(pt, 1.1f)); });
+    cutVarFlag = TrackSelectionFlags::kDCAxy;
+    trackSelFlag = TrackSelection::TrackCuts::kDCAxy;
+  } else if (cutMode == 112) {
+    trackSel.SetMaxDcaXYPtDep([](float pt) { return 10. / 7. * (0.0105f + 0.0350f / pow(pt, 1.1f)); });
+    cutVarFlag = TrackSelectionFlags::kDCAxy;
+    trackSelFlag = TrackSelection::TrackCuts::kDCAxy;
+  } else if (cutMode == 113) {
+    trackSel.SetMaxDcaZ(1.0);
+    cutVarFlag = TrackSelectionFlags::kDCAz;
+    trackSelFlag = TrackSelection::TrackCuts::kDCAz;
+  } else if (cutMode == 114) {
+    trackSel.SetMaxDcaZ(5.0);
+    cutVarFlag = TrackSelectionFlags::kDCAz;
+    trackSelFlag = TrackSelection::TrackCuts::kDCAz;
+  } else if (cutMode == 115) {
+    trackSel.ResetITSRequirements();
+    cutVarFlag = TrackSelectionFlags::kITSHits;
+    trackSelFlag = TrackSelection::TrackCuts::kITSHits;
+  } else if (cutMode == 116) {
+    trackSel.SetMinNCrossedRowsTPC(60);
+    cutVarFlag = TrackSelectionFlags::kTPCCrossedRows;
+    trackSelFlag = TrackSelection::TrackCuts::kTPCCrossedRows;
+  } else if (cutMode == 117) {
+    trackSel.SetMinNCrossedRowsTPC(80);
+    cutVarFlag = TrackSelectionFlags::kTPCCrossedRows;
+    trackSelFlag = TrackSelection::TrackCuts::kTPCCrossedRows;
+  }
+  trackSelMask &= (~cutVarFlag);
 }
 
 //**************************************************************************************************
@@ -249,7 +299,11 @@ bool chargedSpectra::initTrack(const T& track)
   if (track.pt() <= ptMinCut || track.pt() >= ptMaxCut) {
     return false;
   }
-  if (!track.isGlobalTrackWoPtEta()) {
+  if (!TrackSelectionFlags::checkFlag(track.trackCutFlag(), trackSelMask)) {
+    return false;
+  }
+  // for systematic variation of standard selections, check if the varied cut is passed
+  if (cutVarFlag && !trackSel.IsSelected(track, trackSelFlag)) {
     return false;
   }
   return true;
