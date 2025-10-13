@@ -25,8 +25,8 @@
 #include <TMCProcess.h>
 #include <TPDGCode.h>
 
-#include <string>
 #include <map>
+#include <string>
 #include <vector>
 
 using namespace o2;
